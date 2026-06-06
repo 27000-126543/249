@@ -4,28 +4,34 @@ import { Card, Form, Select, DatePicker, InputNumber, Button, Space, Row, Col, S
 import { ArrowLeftOutlined, ThunderboltOutlined, CheckCircleOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import dayjs from 'dayjs';
-import { mockRoutes } from '@/services/mock/data';
+import { mockRoutes, mockBuses } from '@/services/mock/data';
+import { calculateScheduleRecommendation, type ScheduleRecommendation } from '@/utils/businessAlgorithms';
+import type { Route } from '@/types';
 
 const { Step } = Steps;
 const { Option } = Select;
+
+const timeSlotConfig: Record<string, { start: number; end: number; label: string }> = {
+  morning: { start: 6, end: 9, label: '早高峰' },
+  noon: { start: 9, end: 16, label: '午间' },
+  evening: { start: 16, end: 19, label: '晚高峰' },
+  night: { start: 19, end: 22, label: '夜间' },
+  all: { start: 6, end: 22, label: '全天' },
+};
+
+const busTypes = [
+  { value: 'electric', label: '纯电动', capacity: 80 },
+  { value: 'hybrid', label: '混合动力', capacity: 75 },
+  { value: 'diesel', label: '燃油', capacity: 70 },
+];
 
 const ScheduleCreate: React.FC = () => {
   const navigate = useNavigate();
   const [form] = Form.useForm();
   const [current, setCurrent] = useState(0);
-  const [recommendation, setRecommendation] = useState<{
-    busCount: number;
-    estimatedLoadRate: number;
-    estimatedOnTimeRate: number;
-    departureTimes: string[];
-  } | null>(null);
+  const [recommendation, setRecommendation] = useState<ScheduleRecommendation | null>(null);
+  const [selectedRoute, setSelectedRoute] = useState<Route | null>(null);
   const [loading, setLoading] = useState(false);
-
-  const busTypes = [
-    { value: 'electric', label: '纯电动', capacity: 80 },
-    { value: 'hybrid', label: '混合动力', capacity: 75 },
-    { value: 'fuel', label: '燃油', capacity: 70 },
-  ];
 
   const timeSlots = [
     { value: 'morning', label: '早高峰 (06:00-09:00)' },
@@ -35,35 +41,40 @@ const ScheduleCreate: React.FC = () => {
     { value: 'all', label: '全天 (06:00-22:00)' },
   ];
 
+  const handleRouteChange = (routeId: string) => {
+    const route = mockRoutes.find(r => r.id === routeId);
+    setSelectedRoute(route || null);
+  };
+
   const calculateRecommendation = () => {
-    setLoading(true);
-    setTimeout(() => {
-      const interval = form.getFieldValue('intervalMinutes') || 10;
-      const timeSlot = form.getFieldValue('timeSlot');
-      let duration = 180;
-      if (timeSlot === 'all') duration = 960;
-      else if (timeSlot === 'noon') duration = 420;
-      else if (timeSlot === 'night') duration = 180;
+    form.validateFields().then(values => {
+      if (!selectedRoute) {
+        message.error('请先选择线路');
+        return;
+      }
 
-      const trips = Math.ceil(duration / interval);
-      const busCount = Math.ceil(trips / 8);
-      const loadFactor = 0.6 + Math.random() * 0.25;
-      const onTimeFactor = 0.9 + Math.random() * 0.08;
+      setLoading(true);
+      setTimeout(() => {
+        const slotConfig = timeSlotConfig[values.timeSlot];
+        const startTime = dayjs(values.date).hour(slotConfig.start).minute(0);
+        const endTime = dayjs(values.date).hour(slotConfig.end).minute(0);
 
-      const startTime = timeSlot === 'morning' ? 6 : timeSlot === 'evening' ? 16 : timeSlot === 'night' ? 19 : timeSlot === 'all' ? 6 : 9;
-      const departureTimes = Array.from({ length: Math.min(trips, 12) }, (_, i) => 
-        dayjs().hour(startTime).minute(i * interval).format('HH:mm')
-      );
+        const result = calculateScheduleRecommendation({
+          routeId: values.routeId,
+          startTime,
+          endTime,
+          intervalMinutes: values.intervalMinutes,
+          busType: values.busType,
+          route: selectedRoute,
+          buses: mockBuses,
+          trafficCondition: 'moderate',
+        });
 
-      setRecommendation({
-        busCount,
-        estimatedLoadRate: Math.round(loadFactor * 100),
-        estimatedOnTimeRate: Math.round(onTimeFactor * 100),
-        departureTimes,
-      });
-      setLoading(false);
-      setCurrent(1);
-    }, 1000);
+        setRecommendation(result);
+        setLoading(false);
+        setCurrent(1);
+      }, 800);
+    });
   };
 
   const handleSubmit = () => {
@@ -93,7 +104,7 @@ const ScheduleCreate: React.FC = () => {
               <Row gutter={16}>
                 <Col xs={24} md={12}>
                   <Form.Item name="routeId" label="选择线路" rules={[{ required: true, message: '请选择线路' }]}>
-                    <Select placeholder="请选择线路">
+                    <Select placeholder="请选择线路" onChange={handleRouteChange}>
                       {mockRoutes.map(route => (
                         <Option key={route.id} value={route.id}>
                           {route.name} - 全程{route.distance}公里 / {route.duration}分钟
@@ -154,16 +165,16 @@ const ScheduleCreate: React.FC = () => {
                     <Statistic title="推荐配车数" value={recommendation.busCount} suffix="辆" valueStyle={{ color: '#3b82f6' }} />
                   </Col>
                   <Col span={12}>
-                    <Statistic title="总班次" value={recommendation.departureTimes.length * 2} suffix="班" valueStyle={{ color: '#8b5cf6' }} />
+                    <Statistic title="总班次" value={recommendation.totalTrips * 2} suffix="班" valueStyle={{ color: '#8b5cf6' }} />
                   </Col>
                 </Row>
 
                 <div>
                   <div className="flex justify-between mb-2">
                     <span className="text-slate-600">预计满载率</span>
-                    <span className="font-medium text-blue-600">{recommendation.estimatedLoadRate}%</span>
+                    <span className="font-medium text-blue-600">{recommendation.estimatedLoadFactor}%</span>
                   </div>
-                  <Progress percent={recommendation.estimatedLoadRate} strokeColor="#3b82f6" />
+                  <Progress percent={recommendation.estimatedLoadFactor} strokeColor="#3b82f6" />
                 </div>
 
                 <div>
@@ -177,10 +188,10 @@ const ScheduleCreate: React.FC = () => {
                 <div>
                   <div className="text-slate-600 mb-2">推荐发车时刻（部分）</div>
                   <div className="flex flex-wrap gap-2">
-                    {recommendation.departureTimes.map((time, i) => (
+                    {recommendation.departureTimes.slice(0, 8).map((time, i) => (
                       <Tag key={i} color="blue">{time}</Tag>
                     ))}
-                    <Tag>...</Tag>
+                    {recommendation.departureTimes.length > 8 && <Tag>...</Tag>}
                   </div>
                 </div>
 

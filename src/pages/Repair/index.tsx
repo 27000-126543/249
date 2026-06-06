@@ -1,11 +1,12 @@
 
-import React, { useState } from 'react';
-import { Table, Button, Space, Tag, Card, Select, Modal, Form, Input, message, Timeline, Descriptions, Row, Col, Statistic } from 'antd';
-import { PlusOutlined, ToolOutlined, WarningOutlined, CheckOutlined, ClockCircleOutlined } from '@ant-design/icons';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
+import { Table, Button, Space, Tag, Card, Select, Modal, Form, Input, message, Timeline, Descriptions, Row, Col, Statistic, Badge } from 'antd';
+import { PlusOutlined, ToolOutlined, WarningOutlined, CheckOutlined, ClockCircleOutlined, AlertOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import type { ColumnsType } from 'antd/es/table';
 import type { RepairTicket } from '@/types';
 import { mockRepairTickets, mockBuses } from '@/services/mock/data';
+import { checkAndEscalateTickets, calculateRepairEstimate } from '@/utils/businessAlgorithms';
 
 const { TextArea } = Input;
 
@@ -16,6 +17,23 @@ const Repair: React.FC = () => {
   const [selectedRecord, setSelectedRecord] = useState<RepairTicket | null>(null);
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [form] = Form.useForm();
+  const timerRef = useRef<NodeJS.Timeout | null>(null);
+
+  useEffect(() => {
+    timerRef.current = setInterval(() => {
+      const result = checkAndEscalateTickets(data);
+      if (result.escalatedIds.length > 0) {
+        setData(result.updatedTickets);
+        message.warning(`${result.escalatedIds.length} 个工单因超时未处理已自动升级到设备部长`);
+      }
+    }, 60000);
+
+    return () => {
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+      }
+    };
+  }, [data]);
 
   const faultTypeMap: Record<string, { color: string; text: string }> = {
     engine: { color: 'red', text: '发动机' },
@@ -41,12 +59,20 @@ const Repair: React.FC = () => {
     escalated: { color: 'red', text: '已升级' },
   };
 
+  const getHoursOpen = (ticket: RepairTicket) => {
+    return dayjs().diff(dayjs(ticket.createdAt), 'hour');
+  };
+
+  const isOverdue = (ticket: RepairTicket) => {
+    return ticket.status === 'in_progress' && getHoursOpen(ticket) >= 48;
+  };
+
   const columns: ColumnsType<RepairTicket> = [
     {
       title: '工单编号',
       dataIndex: 'id',
       key: 'id',
-      width: 100,
+      width: 120,
     },
     {
       title: '车辆',
@@ -76,11 +102,14 @@ const Repair: React.FC = () => {
       title: '状态',
       dataIndex: 'status',
       key: 'status',
-      render: (status) => (
+      render: (status, record) => (
         <Space>
           <Tag color={statusMap[status]?.color}>{statusMap[status]?.text}</Tag>
-          {status === 'in_progress' && dayjs().diff(dayjs(selectedRecord?.createdAt || data[0].createdAt), 'hour') > 48 && (
-            <Tag color="red" icon={<WarningOutlined />}>超时预警</Tag>
+          {record.escalated && (
+            <Tag color="red" icon={<AlertOutlined />}>已升级</Tag>
+          )}
+          {isOverdue(record) && !record.escalated && (
+            <Tag color="orange" icon={<WarningOutlined />}>超时预警</Tag>
           )}
         </Space>
       ),
@@ -90,6 +119,27 @@ const Repair: React.FC = () => {
       dataIndex: 'createdAt',
       key: 'createdAt',
       render: (t) => dayjs(t).format('YYYY-MM-DD HH:mm'),
+    },
+    {
+      title: '处理时长',
+      key: 'duration',
+      render: (_, record) => {
+        const hours = getHoursOpen(record);
+        if (record.status === 'completed' && record.completedAt) {
+          const completedHours = dayjs(record.completedAt).diff(dayjs(record.createdAt), 'hour');
+          return <span className="text-green-600">{completedHours} 小时</span>;
+        }
+        return (
+          <Space>
+            <span className={hours >= 48 ? 'text-red-600 font-medium' : 'text-slate-600'}>
+              {hours} 小时
+            </span>
+            {hours >= 36 && hours < 48 && (
+              <Badge status="warning" text={`还剩 ${48 - hours}h 升级`} />
+            )}
+          </Space>
+        );
+      },
     },
     {
       title: '操作',
@@ -116,15 +166,30 @@ const Repair: React.FC = () => {
   ];
 
   const handleAssign = (record: RepairTicket) => {
-    const newData = data.map(item => 
-      item.id === record.id ? { ...item, status: 'in_progress' as const, startedAt: dayjs().format(), assignedTeamId: 'team1' } : item
+    const estimate = calculateRepairEstimate(record.faultType, record.severity);
+    const newData: RepairTicket[] = data.map(item =>
+      item.id === record.id ? {
+        ...item,
+        status: 'in_progress' as const,
+        startedAt: dayjs().format(),
+        assignedTeamId: 'team1',
+        estimatedHours: estimate.estimatedHours,
+        estimatedCost: estimate.estimatedCost,
+        materialList: estimate.materials.map((m, i) => ({
+          id: `mat${i}`,
+          name: m,
+          quantity: 1,
+          unit: '件',
+          status: 'requested' as const,
+        })),
+      } : item
     );
     setData(newData);
-    message.success('已分配维修班组，物料领用单已生成');
+    message.success(`已分配维修班组，预计 ${estimate.estimatedHours} 小时完成`);
   };
 
   const handleComplete = (record: RepairTicket) => {
-    const newData = data.map(item => 
+    const newData = data.map(item =>
       item.id === record.id ? { ...item, status: 'completed' as const, completedAt: dayjs().format() } : item
     );
     setData(newData);
@@ -133,6 +198,7 @@ const Repair: React.FC = () => {
 
   const handleSubmit = () => {
     form.validateFields().then(values => {
+      const estimate = calculateRepairEstimate(values.faultType, values.severity);
       const newTicket: RepairTicket = {
         id: `repair${Date.now()}`,
         busId: values.busId,
@@ -143,61 +209,66 @@ const Repair: React.FC = () => {
         status: 'new',
         materialList: [],
         createdAt: dayjs().format(),
+        escalated: false,
       };
       setData([newTicket, ...data]);
       setIsModalVisible(false);
       form.resetFields();
-      message.success('报修已提交，系统已推送至对应维修班组');
+      message.success(`报修已提交，系统已推送至对应维修班组。预计 ${estimate.estimatedHours} 小时完成`);
     });
   };
 
-  const filteredData = data.filter(item => {
-    if (statusFilter !== 'all' && item.status !== statusFilter) return false;
-    return true;
-  });
+  const filteredData = useMemo(() => {
+    return data.filter(item => {
+      if (statusFilter !== 'all' && item.status !== statusFilter) return false;
+      return true;
+    });
+  }, [data, statusFilter]);
 
   const pendingCount = data.filter(d => d.status === 'new' || d.status === 'assigned').length;
   const inProgressCount = data.filter(d => d.status === 'in_progress').length;
   const completedCount = data.filter(d => d.status === 'completed').length;
-  const escalatedCount = data.filter(d => d.status === 'escalated').length;
+  const escalatedCount = data.filter(d => d.escalated).length;
+  const overdueCount = data.filter(d => isOverdue(d)).length;
 
   return (
     <div className="space-y-6">
       <Row gutter={[16, 16]}>
         <Col xs={24} sm={12} md={6}>
-          <Card>
+          <Card className="gradient-card">
             <Statistic
               title="待处理工单"
               value={pendingCount}
-              prefix={<ClockCircleOutlined className="text-orange-500" />}
-              valueStyle={{ color: '#f59e0b' }}
+              prefix={<ClockCircleOutlined className="text-orange-400" />}
+              valueStyle={{ color: '#fbbf24' }}
             />
           </Card>
         </Col>
         <Col xs={24} sm={12} md={6}>
-          <Card>
+          <Card className="gradient-card">
             <Statistic
               title="维修中"
               value={inProgressCount}
-              valueStyle={{ color: '#3b82f6' }}
+              valueStyle={{ color: '#60a5fa' }}
+              suffix={overdueCount > 0 ? <Tag color="orange" className="ml-2">{overdueCount}个超时</Tag> : undefined}
             />
           </Card>
         </Col>
         <Col xs={24} sm={12} md={6}>
-          <Card>
+          <Card className="gradient-card">
             <Statistic
               title="已完成"
               value={completedCount}
-              valueStyle={{ color: '#10b981' }}
+              valueStyle={{ color: '#34d399' }}
             />
           </Card>
         </Col>
         <Col xs={24} sm={12} md={6}>
-          <Card>
+          <Card className="gradient-card">
             <Statistic
-              title="已升级"
+              title="已升级工单"
               value={escalatedCount}
-              valueStyle={{ color: escalatedCount > 0 ? '#ef4444' : '#6b7280' }}
+              valueStyle={{ color: escalatedCount > 0 ? '#f87171' : '#9ca3af' }}
             />
           </Card>
         </Col>
@@ -211,8 +282,12 @@ const Repair: React.FC = () => {
               <Select.Option value="new">待分配</Select.Option>
               <Select.Option value="in_progress">维修中</Select.Option>
               <Select.Option value="completed">已完成</Select.Option>
-              <Select.Option value="escalated">已升级</Select.Option>
             </Select>
+            {overdueCount > 0 && (
+              <Tag color="red" icon={<WarningOutlined />}>
+                {overdueCount} 个工单即将超时升级
+              </Tag>
+            )}
           </Space>
           <Button type="primary" icon={<PlusOutlined />} onClick={() => setIsModalVisible(true)}>
             一键报修
@@ -259,9 +334,10 @@ const Repair: React.FC = () => {
           <Form.Item name="description" label="故障描述" rules={[{ required: true, message: '请描述故障情况' }]}>
             <TextArea rows={4} placeholder="请详细描述故障现象" />
           </Form.Item>
-          <div className="bg-blue-50 rounded-lg p-3 text-sm text-blue-700">
-            <CheckOutlined className="mr-2" />
-            系统将根据故障类型自动推送至对应维修班组，并生成物料领用单。超过48小时未修好将自动升级到设备部长。
+          <div className="bg-blue-50 rounded-lg p-3 text-sm text-blue-700 space-y-1">
+            <div><CheckOutlined className="mr-2" />系统将根据故障类型自动推送至对应维修班组</div>
+            <div><CheckOutlined className="mr-2" />自动生成物料领用单和维修工时预估</div>
+            <div><WarningOutlined className="mr-2" />超过48小时未修好将自动升级到设备部长</div>
           </div>
         </Form>
       </Modal>
@@ -293,13 +369,26 @@ const Repair: React.FC = () => {
                 </Tag>
               </Descriptions.Item>
               <Descriptions.Item label="状态">
-                <Tag color={statusMap[selectedRecord.status]?.color}>
-                  {statusMap[selectedRecord.status]?.text}
-                </Tag>
+                <Space>
+                  <Tag color={statusMap[selectedRecord.status]?.color}>
+                    {statusMap[selectedRecord.status]?.text}
+                  </Tag>
+                  {selectedRecord.escalated && <Tag color="red">已升级</Tag>}
+                </Space>
               </Descriptions.Item>
               <Descriptions.Item label="报修时间">
                 {dayjs(selectedRecord.createdAt).format('YYYY-MM-DD HH:mm')}
               </Descriptions.Item>
+              {selectedRecord.estimatedHours && (
+                <Descriptions.Item label="预计工时">
+                  {selectedRecord.estimatedHours} 小时
+                </Descriptions.Item>
+              )}
+              {selectedRecord.estimatedCost && (
+                <Descriptions.Item label="预计费用">
+                  ¥{selectedRecord.estimatedCost}
+                </Descriptions.Item>
+              )}
             </Descriptions>
 
             <div>
@@ -307,7 +396,7 @@ const Repair: React.FC = () => {
               <div className="bg-slate-50 rounded-lg p-3">{selectedRecord.description}</div>
             </div>
 
-            {selectedRecord.materialList.length > 0 && (
+            {selectedRecord.materialList && selectedRecord.materialList.length > 0 && (
               <div>
                 <div className="text-sm text-slate-500 mb-2">物料领用单</div>
                 <Table
@@ -335,9 +424,11 @@ const Repair: React.FC = () => {
                     : { color: 'gray', children: '待分配维修班组' },
                   selectedRecord.escalatedAt
                     ? { color: 'red', children: `已升级设备部长 - ${dayjs(selectedRecord.escalatedAt).format('YYYY-MM-DD HH:mm')}` }
-                    : dayjs().diff(dayjs(selectedRecord.createdAt), 'hour') > 48
-                    ? { color: 'red', children: '超时预警，即将升级' }
-                    : { color: 'gray', children: '维修进行中（48小时内完成）' },
+                    : getHoursOpen(selectedRecord) >= 36 && selectedRecord.status === 'in_progress'
+                    ? { color: 'orange', children: `超时预警 - 还剩 ${Math.max(0, 48 - getHoursOpen(selectedRecord))} 小时升级` }
+                    : selectedRecord.status === 'in_progress'
+                    ? { color: 'blue', children: '维修进行中（48小时内完成）' }
+                    : { color: 'gray', children: '等待处理' },
                   selectedRecord.completedAt
                     ? { color: 'green', children: `维修完成 - ${dayjs(selectedRecord.completedAt).format('YYYY-MM-DD HH:mm')}` }
                     : { color: 'gray', children: '待完成' },

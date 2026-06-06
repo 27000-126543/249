@@ -35,6 +35,9 @@ export interface Route {
   stations: Station[];
   distance: number;
   duration: number;
+  estimatedDuration?: number;
+  designCapacity?: number;
+  vehicleType?: 'large' | 'medium' | 'small';
 }
 
 export type BusStatus = 'idle' | 'running' | 'charging' | 'repair' | 'maintenance';
@@ -109,6 +112,10 @@ export interface RosterEntry {
   shiftType: ShiftType;
   tripIds: string[];
   workHours: number;
+  departureTime?: string;
+  routeId?: string;
+  busId?: string;
+  status?: string;
 }
 
 export type SwapRequestStatus = 'pending' | 'leader_approved' | 'manager_approved' | 'rejected' | 'auto_approved';
@@ -166,6 +173,15 @@ export interface PassengerData {
   isPeak: boolean;
 }
 
+export interface PassengerHeatmapData {
+  stationId: string;
+  stationName: string;
+  boardings: number;
+  alightings: number;
+  peakBoardings: number;
+  timeDistribution: number[];
+}
+
 export type PileStatus = 'idle' | 'occupied' | 'locked' | 'faulty';
 export type PileType = 'fast' | 'slow';
 
@@ -208,6 +224,9 @@ export interface RepairTicket {
   startedAt?: string;
   completedAt?: string;
   escalatedAt?: string;
+  escalated?: boolean;
+  estimatedHours?: number;
+  estimatedCost?: number;
 }
 
 export interface DashboardStats {
