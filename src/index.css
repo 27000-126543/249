@@ -1,0 +1,161 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
+  line-height: 1.5;
+  font-weight: 400;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  background-color: #0a1628;
+  color: #e2e8f0;
+  min-height: 100vh;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+.ant-layout {
+  background: #0a1628;
+}
+
+.ant-layout-sider {
+  background: #0f1e36 !important;
+}
+
+.ant-menu-dark {
+  background: #0f1e36 !important;
+}
+
+.ant-card {
+  background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+  border: 1px solid #334155;
+  border-radius: 12px;
+}
+
+.ant-card-head {
+  border-bottom: 1px solid #334155;
+  color: #e2e8f0;
+}
+
+.ant-table {
+  background: transparent;
+}
+
+.ant-table-thead > tr > th {
+  background: #1e293b !important;
+  color: #94a3b8 !important;
+  border-bottom: 1px solid #334155 !important;
+}
+
+.ant-table-tbody > tr > td {
+  border-bottom: 1px solid #334155 !important;
+  color: #e2e8f0;
+}
+
+.ant-table-tbody > tr:hover > td {
+  background: #1e293b !important;
+}
+
+.ant-input,
+.ant-select-selector,
+.ant-picker {
+  background: #1e293b !important;
+  border-color: #334155 !important;
+  color: #e2e8f0 !important;
+}
+
+.ant-modal-content,
+.ant-drawer-content {
+  background: #0f1e36 !important;
+}
+
+.ant-modal-header,
+.ant-drawer-header {
+  background: #1e293b !important;
+  border-bottom: 1px solid #334155;
+}
+
+.ant-modal-title,
+.ant-drawer-title {
+  color: #e2e8f0 !important;
+}
+
+.ant-statistic-title {
+  color: #94a3b8 !important;
+}
+
+.ant-statistic-content {
+  color: #e2e8f0 !important;
+}
+
+.ant-timeline-item-head {
+  background: #1677ff !important;
+}
+
+.ant-timeline-item-tail {
+  border-color: #334155 !important;
+}
+
+.ant-tag {
+  border: none;
+}
+
+.ant-badge-status-dot {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: #1e293b;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #475569;
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #64748b;
+}
+
+.gradient-card {
+  background: linear-gradient(135deg, #1e3a5f 0%, #0f1e36 100%);
+  border: 1px solid rgba(22, 119, 255, 0.3);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+}
+
+.glow-text {
+  text-shadow: 0 0 20px rgba(22, 119, 255, 0.5);
+}
+
+.pulse-dot {
+  animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
